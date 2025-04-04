@@ -81,16 +81,6 @@ class FileCleaner:
 file_cleaner = FileCleaner()
 
 
-def make_waveform(*args, **kwargs):
-    # Further remove some warnings.
-    be = time.time()
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        out = gr.make_waveform(*args, **kwargs)
-        print("Make a video took", time.time() - be)
-        return out
-
-
 def load_model(version='facebook/musicgen-melody'):
     global MODEL
     print("Loading model", version)
@@ -160,15 +150,14 @@ def _do_predictions(texts, melodies, duration, progress=False, gradio_progress=N
             audio_write(
                 file.name, output, MODEL.sample_rate, strategy="loudness",
                 loudness_headroom_db=16, loudness_compressor=True, add_suffix=False)
-            pending_videos.append(pool.submit(make_waveform, file.name))
             out_wavs.append(file.name)
             file_cleaner.add(file.name)
-    out_videos = [pending_video.result() for pending_video in pending_videos]
-    for video in out_videos:
-        file_cleaner.add(video)
+    
     print("batch finished", len(texts), time.time() - be)
     print("Tempfiles currently stored: ", len(file_cleaner.files))
-    return out_videos, out_wavs
+    
+    # Return audio paths directly instead of waveforms
+    return out_wavs
 
 
 def predict_batched(texts, melodies):
@@ -218,13 +207,13 @@ def predict_full(model, model_path, decoder, text, melody, duration, topk, topp,
             raise gr.Error("Interrupted.")
     MODEL.set_custom_progress_callback(_progress)
 
-    videos, wavs = _do_predictions(
+    wavs = _do_predictions(
         [text], [melody], duration, progress=True,
         top_k=topk, top_p=topp, temperature=temperature, cfg_coef=cfg_coef,
         gradio_progress=progress)
     if USE_DIFFUSION:
-        return videos[0], wavs[0], videos[1], wavs[1]
-    return videos[0], wavs[0], None, None
+        return wavs[0], wavs[1]
+    return wavs[0], None, None
 
 
 def toggle_audio_src(choice):
@@ -290,7 +279,7 @@ def ui_full(launch_kwargs):
         submit.click(toggle_diffusion, decoder, [diffusion_output, audio_diffusion], queue=False,
                      show_progress=False).then(predict_full, inputs=[model, model_path, decoder, text, melody, duration, topk, topp,
                                                                      temperature, cfg_coef],
-                                               outputs=[output, audio_output, diffusion_output, audio_diffusion])
+                                               outputs=[audio_output, audio_diffusion])
         radio.change(toggle_audio_src, radio, [melody], queue=False, show_progress=False)
 
         gr.Examples(
